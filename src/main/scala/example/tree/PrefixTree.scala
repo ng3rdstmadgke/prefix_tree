@@ -2,9 +2,16 @@ package example.tree
 
 import scala.reflect.ClassTag
 import scala.annotation.tailrec
+import java.io.OutputStream;
+import java.io.ObjectOutputStream;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.Files;
 
 trait MorphemeBase { val surface: String }
-case class Morpheme(surface: String, token: String, left: Int, right: Int, cost: Int) extends MorphemeBase
+case class Morpheme(surface: String, token: String, left: Int, right: Int, cost: Int) extends MorphemeBase with Serializable
 case class Node[A](index: Int, base: Int, check: Int, data: List[A], charCode: Int)
 case class PrefixTree[A <: MorphemeBase](private val base: Array[Int],
                                          private val check: Array[Int],
@@ -40,14 +47,6 @@ case class PrefixTree[A <: MorphemeBase](private val base: Array[Int],
 
   // 要素を追加する
   def add(morpheme: A): PrefixTree[A] = {
-    /* 
-    val baseCopy  = new Array[Int](size)
-    val checkCopy = new Array[Int](size)
-    val dataCopy  = m.newArray(size)
-    base.copyToArray(baseCopy)
-    check.copyToArray(checkCopy)
-    data.copyToArray(dataCopy)
-    */
     // 厳密に immutable ではなくなってしまうが、add の度に base, check, dataをコピーするのは無理がある
     val baseCopy  = base
     val checkCopy = check
@@ -92,6 +91,13 @@ case class PrefixTree[A <: MorphemeBase](private val base: Array[Int],
     println("array length : %d".format(size))
     println("data num : %d".format(data.count(_ != null)))
   }
+
+  def serialize(file: String): Unit = {
+    // ファイルが存在しない場合は作成、存在する場合は既存の内容を削除して上書き
+    val oos = new ObjectOutputStream(Files.newOutputStream(Paths.get(file)))
+    oos.writeObject(this)
+    oos.close()
+  }
 }
 
 object PrefixTree {
@@ -101,6 +107,13 @@ object PrefixTree {
     val base = new Array[Int](size)
     base(1) = 1
     new PrefixTree[A](base, new Array[Int](size), new Array[List[A]](size))
+  }
+
+  def deserialize(file: String): PrefixTree[Morpheme] = {
+    val ois = new ObjectInputStream(Files.newInputStream(Paths.get(file)))
+    val ret = ois.readObject().asInstanceOf[PrefixTree[Morpheme]]
+    ois.close()
+    ret
   }
 
   // charList の文字で遷移し、遷移が終わった時点のindexを返す

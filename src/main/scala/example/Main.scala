@@ -70,6 +70,7 @@ object Main {
             tree
           }
         }
+        source.close
         doCommand(npt)
       }
       case "check" => {
@@ -89,7 +90,15 @@ object Main {
           }
         }
         println("not registered : %d".format(notRegistered.length))
+        source.close
         doCommand(pt)
+      }
+      case "serialize" => {
+        pt.serialize(dict + ".bin")
+        doCommand(pt)
+      }
+      case "deserialize" => {
+        doCommand(PrefixTree.deserialize(dict + ".bin"))
       }
       case "status" => {
         pt.status()
@@ -103,7 +112,7 @@ object Main {
         println("bye...")
       }
       case _ => {
-        println("command : get, add, delete, build, check, status, dump, exit")
+        println("command : get, add, delete, build, check, serialize, deserialize, status, dump, exit")
         doCommand(pt)
       }
     }
