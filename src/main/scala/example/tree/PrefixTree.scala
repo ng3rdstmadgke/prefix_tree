@@ -10,6 +10,7 @@ import java.nio.file.Files;
 trait MorphemeBase { val surface: String }
 case class Morpheme(surface: String, token: String, left: Int, right: Int, cost: Int) extends MorphemeBase with Serializable
 case class Node[A](index: Int, base: Int, check: Int, data: List[A], charCode: Int)
+@SerialVersionUID(123L)
 case class PrefixTree[A <: MorphemeBase](private val base:  Array[Int],
                                          private val check: Array[Int],
                                          private val data:  ArraySeq[List[A]]) {
@@ -24,6 +25,22 @@ case class PrefixTree[A <: MorphemeBase](private val base:  Array[Int],
         case xs => xs
       }
     }
+  }
+
+  // subject と前方一致するデータを取得しListで返す
+  def search(subject: String): List[(String, List[A])] = {
+    @tailrec
+    def _search(subjectList: List[Char], index: Int, ret: List[(String, List[A])]): List[(String, List[A])] = subjectList match {
+      case Nil => ret
+      case x :: xs => (base(index) + x.toInt) match {
+        case nextIndex if check(nextIndex) != index => ret
+        case nextIndex => data(nextIndex) match {
+            case n @ (null | Nil) => _search(xs, nextIndex, ret)
+            case nextData         => _search(xs, nextIndex, (nextData.head.surface, nextData) :: ret)
+        }
+      }
+    }
+    _search(subject.toList, 1, Nil).reverse
   }
 
   // 要素を削除する
@@ -98,7 +115,7 @@ case class PrefixTree[A <: MorphemeBase](private val base:  Array[Int],
 
 object PrefixTree {
   val CharMax = 65535
-  def apply[A <: MorphemeBase](): PrefixTree[A] = PrefixTree[A](500000)
+  def apply[A <: MorphemeBase](): PrefixTree[A] = PrefixTree[A](700000)
   def apply[A <: MorphemeBase](size: Int): PrefixTree[A] = {
     val base = new Array[Int](size)
     base(1) = 1

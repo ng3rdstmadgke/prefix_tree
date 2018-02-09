@@ -23,6 +23,11 @@ object Main {
         println(pt.get(readLine).mkString("\n"))
         doCommand(pt)
       }
+      case "search" => {
+        print("search > ")
+        println(pt.search(readLine).mkString("\n"))
+        doCommand(pt)
+      }
       case "add" => {
         print("add(surface,token,left,right,cost) > ")
         val line = readLine.split(",")
@@ -98,7 +103,12 @@ object Main {
         doCommand(pt)
       }
       case "deserialize" => {
-        doCommand(PrefixTree.deserialize(dict + ".bin"))
+        val npt: PrefixTree[Morpheme] = try {
+          PrefixTree.deserialize(dict + ".bin")
+        } catch {
+          case e:Exception => println("exec build & serialize"); pt
+        }
+        doCommand(npt)
       }
       case "status" => {
         pt.status()
