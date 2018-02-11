@@ -7,18 +7,17 @@ import java.io.ObjectInputStream
 import java.nio.file.Paths;
 import java.nio.file.Files;
 
-trait MorphemeBase { val surface: String }
-case class Morpheme(surface: String, token: String, left: Int, right: Int, cost: Int) extends MorphemeBase with Serializable
+case class Morpheme(surface: String, token: String, left: Int, right: Int, cost: Int)
 case class Node[A](index: Int, base: Int, check: Int, data: List[A], charCode: Int)
 @SerialVersionUID(123L)
-case class PrefixTree[A <: MorphemeBase](private val base:  Array[Int],
+case class PrefixTree[A](private val base:  Array[Int],
                                          private val check: Array[Int],
                                          private val data:  ArraySeq[List[A]]) {
   val size = base.length
 
-  // 表層文字列がsurfaceの形態素のListを取得する
-  def get(surface: String): List[A] = {
-    PrefixTree._get(surface.toList, 1, base, check) match {
+  // key にマッピングされているデータの List を取得する
+  def get(key: String): List[A] = {
+    PrefixTree._get(key.toList, 1, base, check) match {
       case -1 => Nil
       case idx => data(idx) match {
         case null => Nil
@@ -30,66 +29,106 @@ case class PrefixTree[A <: MorphemeBase](private val base:  Array[Int],
   // subject と前方一致するデータを取得しListで返す
   def search(subject: String): List[(String, List[A])] = {
     @tailrec
-    def _search(subjectList: List[Char], index: Int, ret: List[(String, List[A])]): List[(String, List[A])] = subjectList match {
+    def _search(subjectList: List[Char], index: Int, key: String, ret: List[(String, List[A])]): List[(String, List[A])] = subjectList match {
       case Nil => ret
       case x :: xs => (base(index) + x.toInt) match {
         case nextIndex if check(nextIndex) != index => ret
         case nextIndex => data(nextIndex) match {
-            case n @ (null | Nil) => _search(xs, nextIndex, ret)
-            case nextData         => _search(xs, nextIndex, (nextData.head.surface, nextData) :: ret)
+          case (null | Nil) => _search(xs, nextIndex, key + x, ret)
+          case nextData     => {
+            val k = key + x
+            _search(xs, nextIndex, k, (k, nextData) :: ret)
+          }
         }
       }
     }
-    _search(subject.toList, 1, Nil).reverse
+    _search(subject.toList, 1, "", Nil).reverse
   }
 
   // 要素を削除する
-  def delete(target: A): PrefixTree[A] = {
-    PrefixTree._get(target.surface.toList, 1, base, check) match {
-      case -1  => new PrefixTree[A](base, check, data)
+  // f は引数が削除すべき要素かどうかを判定する関数
+  def delete(key: String)(f: A => Boolean): PrefixTree[A] = {
+    // target を削除した List を返す
+    @tailrec
+    def _delete(charList: List[A], rest: List[A]): List[A] = charList match {
+      case Nil => Nil
+      case x :: xs  => if (f(x)) {
+        rest.reverse ::: xs
+      } else {
+        _delete(xs, x :: rest)
+      }
+    }
+    PrefixTree._get(key.toList, 1, base, check) match {
+      // 遷移に失敗した場合は変更を加えずにObjectを返す
+      case -1  => this
       case idx => data(idx) match {
-        case null => new PrefixTree[A](base, check, data)
-        case xs   => {
-          // ここも都度dataをコピーするのは無理がある
-          data(idx) = PrefixTree._delete(xs, target)
+        // 削除対象要素が見つからなかった場合は変更を加えずにObjectを返す
+        case (null | Nil) => this
+        case xs           => {
+          data(idx) = _delete(xs, Nil)
           new PrefixTree[A](base, check, data)
         }
       }
     }
   }
 
-  // 要素を追加する
-  def add(morpheme: A): PrefixTree[A] = {
-    // 厳密に immutable ではなくなってしまうが、add の度に base, check, dataをコピーするのは無理がある
-    val baseCopy  = base
-    val checkCopy = check
-    val dataCopy  = data
-    getTransitionFailedStatus(morpheme) match {
+  // 要素を追加する(同じ要素が存在する場合は置換)
+  // base, check, data は都度コピーを作らない(処理速度的な問題)
+  // f は引数が置換対象要素かどうかを判定する関数
+  def replace(key: String, elem: A)(f: A => Boolean): PrefixTree[A] = {
+    @tailrec
+    def _replace(charList: List[A], rest: List[A]): List[A] = charList match {
+      case Nil => List(elem)
+      case x :: xs  => if (f(x)) {
+        rest.reverse ::: (elem :: xs)
+      } else {
+        _replace(xs, x :: rest)
+      }
+    }
+    PrefixTree._get(key.toList, 1, base, check) match {
+      case -1 => add(key, elem)
+      case idx => {
+        if (data(idx) == null || data(idx) == Nil) {
+          data(idx) = List(elem)
+        } else {
+          data(idx) = _replace(data(idx), Nil)
+        }
+        new PrefixTree[A](base, check, data)
+      }
+    }
+  }
+
+  // 要素を追加する(同じ要素が存在する場合は登録しない)
+  // base, check, data は都度コピーを作らない(処理速度的な問題)
+  def add(key: String, elem: A): PrefixTree[A] = {
+    getTransitionFailedStatus(key, elem) match {
       // 形態素がすでに登録されていた場合
-      case None               => new PrefixTree[A](baseCopy, checkCopy, dataCopy)
+      case None               => new PrefixTree[A](base, check, data)
       // 遷移が完了し後はListに追加するだけの場合
       case Some((index, Nil)) => {
-        val newData = if (dataCopy(index) == null) List(morpheme) else morpheme :: dataCopy(index)
-        dataCopy(index) = newData
-        new PrefixTree[A](baseCopy, checkCopy, dataCopy)
+        val newData = if (data(index) == null) List(elem) else elem :: data(index)
+        data(index) = newData
+        new PrefixTree[A](base, check, data)
       }
       // 途中で遷移に失敗した場合
-      case Some((index, charList)) => PrefixTree._add[A](morpheme, index, charList, baseCopy, checkCopy, dataCopy) match {
+      case Some((index, charList)) => PrefixTree._add[A](elem, index, charList, base, check, data) match {
         case (eBase, eCheck, eData) => new PrefixTree[A](eBase, eCheck, eData)
       }
     }
   }
 
-  // 遷移失敗時のindexと残りの表層文字列のListを返す。遷移(探索)成功時はNoneを返す。
-  private def getTransitionFailedStatus(morpheme: A): Option[(Int, List[Char])] =  {
+  // key を探索し、遷移失敗時の index と残りの key を List[Char] で返す
+  // 最後まで遷移に成功した場合はNoneを返す
+  private def getTransitionFailedStatus(key: String, elem: A): Option[(Int, List[Char])] =  {
+    @tailrec
     def go(index: Int, charList: List[Char]): Option[(Int, List[Char])] = charList match {
-      case Nil     => if (data(index) == null || !data(index).contains(morpheme)) Some((index, Nil)) else None
+      case Nil     => if (data(index) == null || !data(index).contains(elem)) Some((index, Nil)) else None
       case x :: xs => (base(index) + x.toInt) match {
         case i if (i < base.length && check(i) == index) => go(i, xs)
         case _ => Some((index, charList))
       }
     }
-    go(1, morpheme.surface.toList)
+    go(1, key.toList)
   }
 
   def dump(): Unit = {
@@ -115,14 +154,14 @@ case class PrefixTree[A <: MorphemeBase](private val base:  Array[Int],
 
 object PrefixTree {
   val CharMax = 65535
-  def apply[A <: MorphemeBase](): PrefixTree[A] = PrefixTree[A](700000)
-  def apply[A <: MorphemeBase](size: Int): PrefixTree[A] = {
+  def apply[A](): PrefixTree[A] = PrefixTree[A](700000)
+  def apply[A](size: Int): PrefixTree[A] = {
     val base = new Array[Int](size)
     base(1) = 1
     new PrefixTree[A](base, new Array[Int](size), new ArraySeq[List[A]](size))
   }
 
-  def deserialize[A <: MorphemeBase](file: String): PrefixTree[A] = {
+  def deserialize[A](file: String): PrefixTree[A] = {
     val ois = new ObjectInputStream(Files.newInputStream(Paths.get(file)))
     val ret = ois.readObject().asInstanceOf[PrefixTree[A]]
     ois.close()
@@ -140,14 +179,8 @@ object PrefixTree {
     }
   }
 
-  // target を削除した List を返す
-  def _delete[A](list: List[A], target: A): List[A] = list match {
-    case Nil => Nil
-    case x :: xs  => if (x == target) xs else x :: _delete(xs, target)
-  }
-
   // PrefixTree にデータを追加する
-  private def _add[A](morpheme: A, index: Int, charList: List[Char], base: Array[Int], check: Array[Int], data: ArraySeq[List[A]])
+  private def _add[A](elem: A, index: Int, charList: List[Char], base: Array[Int], check: Array[Int], data: ArraySeq[List[A]])
   : (Array[Int], Array[Int], ArraySeq[List[A]]) = {
     @tailrec
     def go(currIndex: Int, charList: List[Char], base: Array[Int], check: Array[Int], data: ArraySeq[List[A]])
@@ -195,7 +228,7 @@ object PrefixTree {
       }
     }
     val (dataIndex, eBase, eCheck, eData) = go(index, charList, base, check, data)
-    val newData = if (eData(dataIndex) == null) List(morpheme) else morpheme :: eData(dataIndex)
+    val newData = if (eData(dataIndex) == null) List(elem) else elem :: eData(dataIndex)
     eData(dataIndex) = newData
     (eBase, eCheck, eData)
   }

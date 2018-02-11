@@ -13,6 +13,19 @@ object Main {
     val pt = PrefixTree[Morpheme](700000)
     doCommand(pt)
   }
+  def parseLine(input: String): Option[(String, String, Int, Int, Int)] = {
+      val line = input.split(",")
+      if (line.length != 5) {
+        None
+      } else {
+        val surface = line(0).trim
+        val token = line(1).trim
+        val left  = try { line(2).trim.toInt } catch { case e:Exception => -1 }
+        val right = try { line(3).trim.toInt } catch { case e:Exception => -1 }
+        val cost  = try { line(4).trim.toInt } catch { case e:Exception => -1 }
+        Some((surface, token, left, right, cost))
+      }
+  }
   def doCommand(pt: PrefixTree[Morpheme]): Unit = {
     //val dict = "dictionary/dict.nw.500.txt"
     val dict = "dictionary/dict.txt"
@@ -30,47 +43,49 @@ object Main {
       }
       case "add" => {
         print("add(surface,token,left,right,cost) > ")
-        val line = readLine.split(",")
-        if (line.length != 5) {
-          println("invalid value ...")
-          doCommand(pt)
-        } else {
-          val surface = line(0).trim
-          val token = line(1).trim
-          val left  = try { line(2).trim.toInt } catch { case e:Exception => -1 }
-          val right = try { line(3).trim.toInt } catch { case e:Exception => -1 }
-          val cost  = try { line(4).trim.toInt } catch { case e:Exception => -1 }
-          val npt = pt.add(Morpheme(surface, token, left, right, cost))
-          doCommand(npt)
+        parseLine(readLine) match {
+          case None =>{
+             println("invalid value ...")
+             doCommand(pt)
+          }
+          case Some((s, t, l, r, c)) => {
+            doCommand(pt.add(s, Morpheme(s, t, l, r, c)))
+          }
+        }
+      }
+      case "replace" => {
+        print("replace(surface,token,left,right,cost) > ")
+        parseLine(readLine) match {
+          case None =>{
+             println("invalid value ...")
+             doCommand(pt)
+          }
+          case Some((s, t, l, r, c)) => {
+            doCommand(pt.replace(s, Morpheme(s, t, l, r, c)) { m => if (m.left == l && m.right == r) true else false })
+          }
         }
       }
       case "delete" => {
         print("delete(surface,token,left,right,cost) > ")
-        val line = readLine.split(",")
-        if (line.length != 5) {
-          println("invalid value ...")
-          doCommand(pt)
-        } else {
-          val surface = line(0).trim
-          val token = line(1).trim
-          val left  = try { line(2).trim.toInt } catch { case e:Exception => -1 }
-          val right = try { line(3).trim.toInt } catch { case e:Exception => -1 }
-          val cost  = try { line(4).trim.toInt } catch { case e:Exception => -1 }
-          val npt = pt.delete(Morpheme(surface, token, left, right, cost))
-          doCommand(npt)
+        parseLine(readLine) match {
+          case None =>{
+             println("invalid value ...")
+             doCommand(pt)
+          }
+          case Some((s, t, l, r, c)) => {
+            val npt = pt.delete(s) { m => if (m.left == l && m.right == r) true else false }
+            doCommand(npt)
+          }
         }
       }
       case "build" => {
         val source = Source.fromFile(dict, "utf-8")
         val npt = source.getLines.foldLeft(pt) { (tree, i) =>
           if (i.startsWith("nw ")) {
-            val line = i.substring(3).split(",")
-            val surface = line(0).trim
-            val token = line(1).trim
-            val left  = try { line(2).trim.toInt } catch { case e:Exception => -1 }
-            val right = try { line(3).trim.toInt } catch { case e:Exception => -1 }
-            val cost  = try { line(4).trim.toInt } catch { case e:Exception => -1 }
-            tree.add(Morpheme(surface, token.trim, left, right, cost))
+            parseLine(i.substring(3)) match {
+              case None => tree
+              case Some((s, t, l, r, c)) => tree.add(s, Morpheme(s, t, l, r, c))
+            }
           } else {
             tree
           }
@@ -82,14 +97,13 @@ object Main {
         val source = Source.fromFile(dict, "utf-8")
         val notRegistered = source.getLines.foldLeft(Nil: List[Morpheme]) { (list, i) =>
           if (i.startsWith("nw ")) {
-            val line = i.substring(3).split(",")
-            val surface = line(0).trim
-            val token = line(1).trim
-            val left  = try { line(2).trim.toInt } catch { case e:Exception => -1 }
-            val right = try { line(3).trim.toInt } catch { case e:Exception => -1 }
-            val cost  = try { line(4).trim.toInt } catch { case e:Exception => -1 }
-            val target = Morpheme(surface, token, left, right, cost)
-            if (pt.get(surface).contains(target)) list else target :: list
+            parseLine(i.substring(3)) match {
+              case None => list
+              case Some((s, t, l, r, c)) => {
+                val target = Morpheme(s, t, l, r, c)
+                if (pt.get(s).contains(target)) list else target :: list
+              }
+            }
           } else {
             list
           }
@@ -122,7 +136,7 @@ object Main {
         println("bye...")
       }
       case _ => {
-        println("command : get, add, delete, build, check, serialize, deserialize, status, dump, exit")
+        println("command : get, add, replace, delete, build, check, serialize, deserialize, status, dump, exit")
         doCommand(pt)
       }
     }
