@@ -8,9 +8,21 @@ import java.io.BufferedReader
 import java.nio.file.{Paths, Files}
 import java.nio.charset.StandardCharsets
 
+class Timer {
+  private var millis: Long = System.currentTimeMillis();
+  def start(): Unit = {
+    millis = System.currentTimeMillis();
+  }
+  def message(): String = {
+    val end = System.currentTimeMillis();
+    "Time: %d ms".format(end - millis);
+  }
+}
+
 object Main {
+  val timer = new Timer()
   def main(args: Array[String]): Unit = {
-    val pt = PrefixTree[Morpheme](700000)
+    val pt = DoubleArray[Morpheme](700000)
     doCommand(pt)
   }
   def parseLine(input: String): Option[(String, String, Int, Int, Int)] = {
@@ -26,7 +38,7 @@ object Main {
         Some((surface, token, left, right, cost))
       }
   }
-  def doCommand(pt: PrefixTree[Morpheme]): Unit = {
+  def doCommand(pt: DoubleArray[Morpheme]): Unit = {
     //val dict = "dictionary/dict.nw.500.txt"
     val dict = "dictionary/dict.txt"
     print("command > ")
@@ -36,9 +48,38 @@ object Main {
         println(pt.get(readLine).mkString("\n"))
         doCommand(pt)
       }
-      case "search" => {
+      case "search1" => {
         print("search > ")
-        println(pt.search(readLine).mkString("\n"))
+        val line = readLine;
+        (0 until line.length).foreach { j => printf(s"${j} : ");println(pt.search(line.substring(j)).toSeq) }
+        doCommand(pt)
+      }
+      case "search2" => {
+        print("search > ")
+        val line = readLine;
+        (0 until line.length).foreach { j => printf(s"${j} : ");println(pt.search2(line.substring(j)).toSeq) }
+        doCommand(pt)
+      }
+      case "search1m" => {
+        print("search > ")
+        val line = readLine;
+        timer.start();
+        (1 to 499999).foreach { i =>
+          (0 until line.length).foreach { j => pt.search(line.substring(j)).map(_._1).mkString("/") }
+        }
+        (0 until line.length).foreach { j => printf(s"${j} : ");println(pt.search(line.substring(j)).map(_._1).mkString("/")) }
+        println(timer.message());
+        doCommand(pt)
+      }
+      case "search2m" => {
+        print("search > ")
+        val line = readLine;
+        timer.start();
+        (1 to 499999).foreach { i =>
+          (0 until line.length).foreach { j => pt.search2(line.substring(j)).map(_._1).mkString("/") }
+        }
+        (0 until line.length).foreach { j => printf(s"${j} : ");println(pt.search2(line.substring(j)).map(_._1).mkString("/")) }
+        println(timer.message());
         doCommand(pt)
       }
       case "add" => {
@@ -79,21 +120,25 @@ object Main {
         }
       }
       case "build" => {
+        timer.start()
         val source = Source.fromFile(dict, "utf-8")
-        val npt = source.getLines.foldLeft(pt) { (tree, i) =>
-          if (i.startsWith("nw ")) {
-            parseLine(i.substring(3)) match {
-              case None => tree
+        val npt = source.getLines.
+          filter{ line =>
+            line.startsWith("nw ")
+          }.map { line =>
+            parseLine(line.substring(3))
+          }.foldLeft(pt) { (tree, i) =>
+            i match {
               case Some((s, t, l, r, c)) => tree.add(s, Morpheme(s, t, l, r, c))
+              case _ => tree
             }
-          } else {
-            tree
           }
-        }
         source.close
+        println(timer.message)
         doCommand(npt)
       }
       case "check" => {
+        timer.start()
         val source = Source.fromFile(dict, "utf-8")
         val notRegistered = source.getLines.foldLeft(Nil: List[Morpheme]) { (list, i) =>
           if (i.startsWith("nw ")) {
@@ -110,19 +155,28 @@ object Main {
         }
         println("not registered : %d".format(notRegistered.length))
         source.close
+        println(timer.message)
         doCommand(pt)
       }
       case "serialize" => {
+        timer.start()
         pt.serialize(dict + ".bin")
+        println(timer.message)
         doCommand(pt)
       }
       case "deserialize" => {
-        val npt: PrefixTree[Morpheme] = try {
-          PrefixTree.deserialize(dict + ".bin")
+        timer.start()
+        val npt: DoubleArray[Morpheme] = try {
+          DoubleArray.deserialize(dict + ".bin")
         } catch {
           case e:Exception => println("exec build & serialize"); pt
         }
+        println(timer.message)
         doCommand(npt)
+      }
+      case "isEmpty" => {
+        println(pt.isEmpty())
+        doCommand(pt)
       }
       case "status" => {
         pt.status()
@@ -136,7 +190,7 @@ object Main {
         println("bye...")
       }
       case _ => {
-        println("command : get, add, replace, delete, build, check, serialize, deserialize, status, dump, exit")
+        println("command : get, add, search, search_text, replace, delete, build, check, serialize, deserialize, status, dump, isEmpty, exit")
         doCommand(pt)
       }
     }

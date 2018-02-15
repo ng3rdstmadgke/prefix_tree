@@ -8,16 +8,43 @@ import java.nio.file.Paths;
 import java.nio.file.Files;
 
 case class Morpheme(surface: String, token: String, left: Int, right: Int, cost: Int)
-case class Node[A](index: Int, base: Int, check: Int, data: List[A], charCode: Int)
+class NodeIterator[A](val base: Array[Int], val check: Array[Int], val data: ArraySeq[List[A]], val arrayLength: Int, val subject: String) extends Iterator[(String, List[A])] {
+  var arrayIndex = 1;
+  var subjectIndex = 0;
+  val subjectLength = subject.length;
+
+  override def hasNext: Boolean = {
+     while (subjectIndex < subjectLength) {
+      val nextArrayIndex = base(arrayIndex) + subject(subjectIndex).toInt;
+      if (nextArrayIndex >= arrayLength || check(nextArrayIndex) != arrayIndex) return false;
+      val newData = data(nextArrayIndex);
+      if (newData != null && newData != Nil) return true;
+      arrayIndex = nextArrayIndex;
+      subjectIndex += 1;
+    }
+    return false;
+  }
+
+  override def next(): (String, List[A]) = {
+    arrayIndex = base(arrayIndex) + subject(subjectIndex).toInt;
+    subjectIndex += 1;
+    (subject.substring(0, subjectIndex), data(arrayIndex));
+  }
+}
+
 @SerialVersionUID(123L)
-case class PrefixTree[A](private val base:  Array[Int],
-                                         private val check: Array[Int],
-                                         private val data:  ArraySeq[List[A]]) {
+case class DoubleArray[A](private val base:    Array[Int],
+                         private val check:    Array[Int],
+                         private val data:     ArraySeq[List[A]],
+                         private val wordsNum: Int) {
+
   val size = base.length
+
+  def isEmpty(): Boolean = wordsNum == 0
 
   // key にマッピングされているデータの List を取得する
   def get(key: String): List[A] = {
-    PrefixTree._get(key.toList, 1, base, check) match {
+    DoubleArray._get(key.toList, 1, base, check) match {
       case -1 => Nil
       case idx => data(idx) match {
         case null => Nil
@@ -26,28 +53,39 @@ case class PrefixTree[A](private val base:  Array[Int],
     }
   }
 
-  // subject と前方一致するデータを取得しListで返す
   def search(subject: String): List[(String, List[A])] = {
+    val strLen = subject.length;
     @tailrec
-    def _search(subjectList: List[Char], index: Int, key: String, ret: List[(String, List[A])]): List[(String, List[A])] = subjectList match {
-      case Nil => ret
-      case x :: xs => (base(index) + x.toInt) match {
-        case nextIndex if check(nextIndex) != index => ret
-        case nextIndex => data(nextIndex) match {
-          case (null | Nil) => _search(xs, nextIndex, key + x, ret)
-          case nextData     => {
-            val k = key + x
-            _search(xs, nextIndex, k, (k, nextData) :: ret)
+      def _search(subject: String, strIndex: Int,  index: Int, ret: List[(String, List[A])]): List[(String, List[A])] =  {
+        if (strIndex < strLen) {
+          val currStr = subject(strIndex);
+          val nextIndex = base(index) + currStr.toInt;
+          if (nextIndex < base.length && check(nextIndex) == index) {
+            val nextData = data(nextIndex);
+            if (nextData == null || nextData == Nil) {
+              _search(subject,strIndex + 1, nextIndex, ret);
+            } else {
+              val k = subject.substring(0, strIndex + 1);
+              _search(subject, strIndex + 1, nextIndex, (k, nextData) :: ret);
+            }
+          } else {
+            ret;
           }
+        } else {
+          ret;
         }
       }
-    }
-    _search(subject.toList, 1, "", Nil).reverse
+    _search(subject, 0, 1, Nil).reverse
+  }
+
+  // subject と前方一致するデータを取得しListで返す
+  def search2(subject: String): NodeIterator[A] = {
+    new NodeIterator[A](base, check, data, size, subject);
   }
 
   // 要素を削除する
   // f は引数が削除すべき要素かどうかを判定する関数
-  def delete(key: String)(f: A => Boolean): PrefixTree[A] = {
+  def delete(key: String)(f: A => Boolean): DoubleArray[A] = {
     // target を削除した List を返す
     @tailrec
     def _delete(charList: List[A], rest: List[A]): List[A] = charList match {
@@ -58,7 +96,7 @@ case class PrefixTree[A](private val base:  Array[Int],
         _delete(xs, x :: rest)
       }
     }
-    PrefixTree._get(key.toList, 1, base, check) match {
+    DoubleArray._get(key.toList, 1, base, check) match {
       // 遷移に失敗した場合は変更を加えずにObjectを返す
       case -1  => this
       case idx => data(idx) match {
@@ -66,7 +104,7 @@ case class PrefixTree[A](private val base:  Array[Int],
         case (null | Nil) => this
         case xs           => {
           data(idx) = _delete(xs, Nil)
-          new PrefixTree[A](base, check, data)
+          new DoubleArray[A](base, check, data, wordsNum - 1)
         }
       }
     }
@@ -75,7 +113,7 @@ case class PrefixTree[A](private val base:  Array[Int],
   // 要素を追加する(同じ要素が存在する場合は置換)
   // base, check, data は都度コピーを作らない(処理速度的な問題)
   // f は引数が置換対象要素かどうかを判定する関数
-  def replace(key: String, elem: A)(f: A => Boolean): PrefixTree[A] = {
+  def replace(key: String, elem: A)(f: A => Boolean): DoubleArray[A] = {
     @tailrec
     def _replace(charList: List[A], rest: List[A]): List[A] = charList match {
       case Nil => List(elem)
@@ -85,34 +123,35 @@ case class PrefixTree[A](private val base:  Array[Int],
         _replace(xs, x :: rest)
       }
     }
-    PrefixTree._get(key.toList, 1, base, check) match {
-      case -1 => add(key, elem)
+    DoubleArray._get(key.toList, 1, base, check) match {
+      case -1 =>
+        add(key, elem)
       case idx => {
         if (data(idx) == null || data(idx) == Nil) {
           data(idx) = List(elem)
         } else {
           data(idx) = _replace(data(idx), Nil)
         }
-        new PrefixTree[A](base, check, data)
+        new DoubleArray[A](base, check, data, wordsNum)
       }
     }
   }
 
   // 要素を追加する(同じ要素が存在する場合は登録しない)
   // base, check, data は都度コピーを作らない(処理速度的な問題)
-  def add(key: String, elem: A): PrefixTree[A] = {
+  def add(key: String, elem: A): DoubleArray[A] = {
     getTransitionFailedStatus(key, elem) match {
       // 形態素がすでに登録されていた場合
-      case None               => new PrefixTree[A](base, check, data)
+      case None               => this
       // 遷移が完了し後はListに追加するだけの場合
       case Some((index, Nil)) => {
         val newData = if (data(index) == null) List(elem) else elem :: data(index)
         data(index) = newData
-        new PrefixTree[A](base, check, data)
+        new DoubleArray[A](base, check, data, wordsNum + 1)
       }
       // 途中で遷移に失敗した場合
-      case Some((index, charList)) => PrefixTree._add[A](elem, index, charList, base, check, data) match {
-        case (eBase, eCheck, eData) => new PrefixTree[A](eBase, eCheck, eData)
+      case Some((index, charList)) => DoubleArray._add[A](elem, index, charList, base, check, data) match {
+        case (eBase, eCheck, eData) => new DoubleArray[A](eBase, eCheck, eData, wordsNum + 1)
       }
     }
   }
@@ -141,7 +180,9 @@ case class PrefixTree[A](private val base:  Array[Int],
 
   def status(): Unit = {
     println("array length : %d".format(size))
-    println("data num : %d".format(data.count(_ != null)))
+    println("data num : %d".format(data.foldLeft(0){(cnt, d) => if (d != null) d.length + cnt else cnt}))
+    println("empty num : %d".format(check.count(_ == 0)))
+    println("wordsNum : %d".format(wordsNum))
   }
 
   def serialize(file: String): Unit = {
@@ -152,18 +193,19 @@ case class PrefixTree[A](private val base:  Array[Int],
   }
 }
 
-object PrefixTree {
+object DoubleArray {
+  private case class Node[A](index: Int, base: Int, check: Int, data: List[A], charCode: Int)
   val CharMax = 65535
-  def apply[A](): PrefixTree[A] = PrefixTree[A](700000)
-  def apply[A](size: Int): PrefixTree[A] = {
+  def apply[A](): DoubleArray[A] = DoubleArray[A](700000)
+  def apply[A](size: Int): DoubleArray[A] = {
     val base = new Array[Int](size)
     base(1) = 1
-    new PrefixTree[A](base, new Array[Int](size), new ArraySeq[List[A]](size))
+    new DoubleArray[A](base, new Array[Int](size), new ArraySeq[List[A]](size), 0)
   }
 
-  def deserialize[A](file: String): PrefixTree[A] = {
+  def deserialize[A](file: String): DoubleArray[A] = {
     val ois = new ObjectInputStream(Files.newInputStream(Paths.get(file)))
-    val ret = ois.readObject().asInstanceOf[PrefixTree[A]]
+    val ret = ois.readObject().asInstanceOf[DoubleArray[A]]
     ois.close()
     ret
   }
@@ -179,7 +221,7 @@ object PrefixTree {
     }
   }
 
-  // PrefixTree にデータを追加する
+  // DoubleArray にデータを追加する
   private def _add[A](elem: A, index: Int, charList: List[Char], base: Array[Int], check: Array[Int], data: ArraySeq[List[A]])
   : (Array[Int], Array[Int], ArraySeq[List[A]]) = {
     @tailrec
@@ -199,10 +241,10 @@ object PrefixTree {
           go(nextIndex, xs, base, check, data)
         } else {                            // 遷移予定ノードにすでに使用されている場合
           // 1. currIndexから遷移している全てのノードを取得する
-          val nextNodes: List[Node[A]] = PrefixTree.getNextNodes(currIndex, base, check, data)
+          val nextNodes: List[Node[A]] = DoubleArray.getNextNodes(currIndex, base, check, data)
           // 2. 追加対象ノードと1.で求めたノードの全てが移動可能な base 値を求め、 currIndex の base 値を更新する
           // 計算途中で配列の拡張が必要になるため、計算後の配列も返す
-          val (newBase, eBase, eCheck, eData) = PrefixTree.findNewBase(new Node[A](-1, -1, -1, null, currCharCode) :: nextNodes, 1, base, check, data)
+          val (newBase, eBase, eCheck, eData) = DoubleArray.findNewBase(new DoubleArray.Node[A](-1, -1, -1, null, currCharCode) :: nextNodes, base(currIndex), base, check, data)
           eBase(currIndex) = newBase
           // 3. 2.で求めた base 値で追加対象ノードの index を求め base 値と check 値を更新
           val nextIndex = newBase + currCharCode
@@ -216,7 +258,7 @@ object PrefixTree {
             eData(dst)  = node.data
           }
           // 5. 1.で求めたノードから更に遷移しているノードの check 値をコピー後の index に更新
-          PrefixTree.relocateAfterNextNode(nextNodes, newBase, eBase, eCheck, eData)
+          DoubleArray.relocateAfterNextNode(nextNodes, newBase, eBase, eCheck, eData)
           // 6. 1.で求めたノードのbase, check, dataをリセット
           nextNodes.foreach { node =>
             eBase(node.index)  = 0
@@ -236,12 +278,12 @@ object PrefixTree {
   // currIndex の遷移先ノードを List で返す
   // check 値が currIndex と等しいノードが遷移先
   private def getNextNodes[A](currIndex: Int, base: Array[Int], check: Array[Int], data: ArraySeq[List[A]]): List[Node[A]] = {
-    val end = if (base(currIndex) + PrefixTree.CharMax < base.length) base(currIndex) + PrefixTree.CharMax else base.length - 1
+    val end = if (base(currIndex) + DoubleArray.CharMax < base.length) base(currIndex) + DoubleArray.CharMax else base.length - 1
     @tailrec
     def _getNextNodes(ptr: Int, ret: List[Node[A]]): List[Node[A]] = {
       if (ptr > end) ret
       else check(ptr) match {
-          case `currIndex` => _getNextNodes(ptr + 1, new Node[A](ptr, base(ptr), check(ptr), data(ptr), ptr - base(currIndex)) :: ret)
+          case `currIndex` => _getNextNodes(ptr + 1, new DoubleArray.Node[A](ptr, base(ptr), check(ptr), data(ptr), ptr - base(currIndex)) :: ret)
           case _           => _getNextNodes(ptr + 1, ret)
         }
     }
@@ -278,9 +320,10 @@ object PrefixTree {
     val size = Math.floor(base.length * 1.25).toInt
     val baseCopy  = new Array[Int](size)
     val checkCopy = new Array[Int](size)
-    val dataCopy  = data.clone
+    val dataCopy  = new ArraySeq[List[A]](size)
     base.copyToArray(baseCopy)
     check.copyToArray(checkCopy)
+    (0 until data.length).foreach( i => dataCopy(i) = data(i))
     (baseCopy, checkCopy, dataCopy)
   }
 
@@ -292,4 +335,3 @@ object PrefixTree {
     }
   }
 }
-
