@@ -114,7 +114,8 @@ object Main {
              doCommand(pt)
           }
           case Some((s, t, l, r, c)) => {
-            val npt = pt.delete(s) { m => if (m.left == l && m.right == r) true else false }
+            val elem = Morpheme(s, t, l, r, c);
+            val npt = pt.delete(s, elem) { (d1, d2) => d1.left == d2.left && d1.right == d2.right };
             doCommand(npt)
           }
         }

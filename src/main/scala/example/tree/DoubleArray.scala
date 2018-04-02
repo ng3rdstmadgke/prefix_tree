@@ -53,6 +53,7 @@ case class DoubleArray[A](private val base:    Array[Int],
     }
   }
 
+  // subject と前方一致するデータを取得しListで返す
   def search(subject: String): List[(String, List[A])] = {
     val strLen = subject.length;
     @tailrec
@@ -78,38 +79,38 @@ case class DoubleArray[A](private val base:    Array[Int],
     _search(subject, 0, 1, Nil).reverse
   }
 
-  // subject と前方一致するデータを取得しListで返す
   def search2(subject: String): NodeIterator[A] = {
     new NodeIterator[A](base, check, data, size, subject);
   }
 
-  // 要素を削除する
-  // f は引数が削除すべき要素かどうかを判定する関数
-  def delete(key: String)(f: A => Boolean): DoubleArray[A] = {
+  /**
+   * key に格納されているデータから elem を削除する
+   * f は削除すべき要素かどうかを判定する関数。第一引数には判定対象の要素、第二引数には elem が入る
+   */
+  def delete(key: String, elem: A)(f: (A, A) => Boolean): DoubleArray[A] = {
     // target を削除した List を返す
     @tailrec
-    def _delete(charList: List[A], rest: List[A]): List[A] = charList match {
-      case Nil => Nil
-      case x :: xs  => if (f(x)) {
-        rest.reverse ::: xs
-      } else {
-        _delete(xs, x :: rest)
+      def _delete(charList: List[A], rest: List[A]): List[A] = charList match {
+        case Nil => Nil;
+        case x :: xs  => if (f(x, elem)) {
+          rest.reverse ::: xs;
+        } else {
+          _delete(xs, x :: rest);
+        }
       }
-    }
     DoubleArray._get(key.toList, 1, base, check) match {
       // 遷移に失敗した場合は変更を加えずにObjectを返す
-      case -1  => this
+      case -1  => this;
       case idx => data(idx) match {
         // 削除対象要素が見つからなかった場合は変更を加えずにObjectを返す
-        case (null | Nil) => this
+        case (null | Nil) => this;
         case xs           => {
-          data(idx) = _delete(xs, Nil)
-          new DoubleArray[A](base, check, data, wordsNum - 1)
+          data(idx) = _delete(xs, Nil);
+          new DoubleArray[A](base, check, data, wordsNum - 1);
         }
       }
     }
   }
-
   // 要素を追加する(同じ要素が存在する場合は置換)
   // base, check, data は都度コピーを作らない(処理速度的な問題)
   // f は引数が置換対象要素かどうかを判定する関数
